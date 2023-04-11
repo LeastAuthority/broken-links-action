@@ -1,0 +1,68 @@
+name: 'broken-links'
+description: 'Detect broken links in html content (relative only)'
+inputs:
+  path:
+    description: 'Local path to html content (working directory by default)'
+    required: true
+  prefix:
+    description: 'Prefix expected by the html content (empty by default)'
+    required: false
+    default: ''
+  root:
+    description: 'Root page to start detection (index.htm or html by default)'
+    required: false
+    default: '/'
+  port:
+    description: 'Port use by the temporary http server'
+    required: false
+    default: 8000
+outputs:
+  result:
+    description: 'Result of the detection'
+    value: ${{ steps.scan.outputs.result }}
+runs:
+  using: "composite"
+  steps:
+      - id: scan
+        name: Scan for broken links
+        shell: bash
+        run: |
+          # Use a temp server to check the links
+          echo ":rocket: Broken link detection started" >> $GITHUB_STEP_SUMMARY
+          # Prepare temp files
+          TMP_LOG="$(mktemp log.XXXXXXXXXX)"
+          TMP_OUT="$(mktemp out.XXXXXXXXXX)"
+          # Prepare serving directory
+          if [ -z "${{ inputs.prefix }}" ]; then
+            HTTPD_DIR="${{ inputs.path }}"
+          else
+            # Prepare symbolic link to content with prefix
+            HTTPD_DIR="$(mktemp --directory www.XXXXXXXXXX)"
+            pushd "${HTTPD_DIR}"; ln -s "../${{ inputs.path }}" "${{ inputs.prefix }}"; popd
+          fi
+          # Start a minimal http server to host the files
+          HTTPD_PID=$(nohup python3 -m http.server --directory ${HTTPD_DIR} --bind 127.0.0.1 ${{ inputs.port }} > /dev/null 2>&1 & echo $!)
+          # Ordely exit with trimmed output
+          trap "kill -TERM ${HTTPD_PID} && rm -f ${TMP_LOG} ${TMP_OUT}" EXIT
+          # Wait for the server
+          for try in {1..3}; do
+            nc -w 3 127.0.0.1 ${{ inputs.port }} > /dev/null 2>&1 && break || { sleep 1; }
+            if [ $try = 3 ]; then
+              echo ":x: Scan server failed to start" >> $GITHUB_STEP_SUMMARY;
+              exit 1
+            fi
+          done
+          # Recursively test all local
+          RET=0
+          wget --spider --recursive --no-verbose -o "${TMP_LOG}" \
+          "http://127.0.0.1:${{ inputs.port }}${{ inputs.root }}"\
+          && echo ":heavy_check_mark: Scan completed - no broken link found" >> $GITHUB_STEP_SUMMARY \
+          || { echo ":x: Scan completed - some link are broken" >> $GITHUB_STEP_SUMMARY; RET=1; }
+          # Parse output and send back as result
+          sed -n -r -e '/Found/,/FINISHED/ p' "${TMP_LOG}" > "${TMP_OUT}"
+          echo "result<<$(basename "${TMP_OUT}")" >> $GITHUB_OUTPUT
+          cat "${TMP_OUT}" >> $GITHUB_OUTPUT
+          echo "$(basename "${TMP_OUT}")" >> $GITHUB_OUTPUT
+          # Print raw outpout log and exit
+          cat "${TMP_LOG}"
+          exit ${RET}

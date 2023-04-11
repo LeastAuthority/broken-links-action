@@ -32,13 +32,18 @@ runs:
           # Prepare temp files
           TMP_LOG="$(mktemp log.XXXXXXXXXX)"
           TMP_OUT="$(mktemp out.XXXXXXXXXX)"
-          # Prepare symbolic link to content with prefix
-          TMP_WWW="$(mktemp --directory www.XXXXXXXXXX)"
-          pushd "${TMP_WWW}"; ln -s "../${{ inputs.path }}" "${{ inputs.prefix }}"; popd
+          # Prepare serving directory
+          if [ -z "${{ inputs.prefix }}" ]; then
+            HTTPD_DIR="${{ inputs.path }}"
+          else
+            # Prepare symbolic link to content with prefix
+            HTTPD_DIR="$(mktemp --directory www.XXXXXXXXXX)"
+            pushd "${HTTPD_DIR}"; ln -s "../${{ inputs.path }}" "${{ inputs.prefix }}"; popd
+          fi
           # Start a minimal http server to host the files
-          HTTPD_PID=$(nohup python3 -m http.server --directory ${TMP_WWW} --bind 127.0.0.1 ${{ inputs.port }} > /dev/null 2>&1 & echo $!)
+          HTTPD_PID=$(nohup python3 -m http.server --directory ${HTTPD_DIR} --bind 127.0.0.1 ${{ inputs.port }} > /dev/null 2>&1 & echo $!)
           # Ordely exit with trimmed output
-          trap "rm -rf ${TMP_WWW} && kill -TERM ${HTTPD_PID} && rm -f ${TMP_LOG} ${TMP_OUT}" EXIT
+          trap "kill -TERM ${HTTPD_PID} && rm -f ${TMP_LOG} ${TMP_OUT}" EXIT
           # Wait for the server
           for try in {1..3}; do
             nc -w 3 127.0.0.1 ${{ inputs.port }} > /dev/null 2>&1 && break || { sleep 1; }

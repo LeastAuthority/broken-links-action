@@ -20,18 +20,51 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Call action w/o inputs
+      - name: Call action with path and NO broken links
         id: call_good
         uses: ./
         with:
           path: test/html_good_content
         continue-on-error: true
 
-      - name: Call action w/o inputs
+      - name: Call action with path and some broken links
         id: call_bad
         uses: ./
         with:
           path: test/html_bad_content
+        continue-on-error: true
+
+      - name: Proper exit
+        run: |
+          if [ ${{ steps.call_good.outcome }} != 'success' \
+                -o ${{ steps.call_bad.outcome }} != 'failure' ]
+          then
+            echo ":x: Test failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo ":heavy_check_mark: Test succeeded" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  test_prefix:
+    name: Test prefix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Call action with prefix and NO broken links
+        id: call_good
+        uses: ./
+        with:
+          path: test/html_good_content
+          prefix: site1
+        continue-on-error: true
+
+      - name: Call action with prefix and some broken links
+        id: call_bad
+        uses: ./
+        with:
+          path: test/html_bad_content
+          prefix: site1
         continue-on-error: true
 
       - name: Proper exit
